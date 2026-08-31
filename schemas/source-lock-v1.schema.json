@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routerctl.dev/schemas/source-lock-v1.schema.json",
+  "title": "router-upstream locked source record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "status", "upstream", "source_type", "revision", "archive", "sha256", "license", "retrieved_at", "provenance"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._+-]*$"},
+    "status": {"enum": ["pending-verification", "locked"]},
+    "upstream": {"type": "string", "pattern": "^https://\\S+$"},
+    "source_type": {"enum": ["git", "archive"]},
+    "revision": {"type": "string", "minLength": 1},
+    "archive": {"type": "string", "pattern": "^(?!.*\\.\\.)(?!.*[/\\\\])[^\\u0000-\\u001F\\u007F]+$"},
+    "sha256": {"type": "string", "pattern": "^(unset|[a-f0-9]{64})$"},
+    "license": {"type": "string", "minLength": 1},
+    "retrieved_at": {"type": "string", "format": "date-time"},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["archive_url", "retrieved_by", "retrieval_method", "evidence"],
+      "properties": {
+        "archive_url": {"type": "string", "pattern": "^https://\\S+$"},
+        "retrieved_by": {"type": "string", "minLength": 1},
+        "retrieval_method": {"enum": ["manual", "automation"]},
+        "evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "type"],
+          "properties": {
+            "status": {"enum": ["verified", "not-present", "not-verified"]},
+            "type": {"type": "string", "minLength": 1},
+            "signer": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "locked"}}},
+      "then": {
+        "properties": {
+          "revision": {"not": {"const": "unset"}},
+          "archive": {"not": {"const": "unset"}},
+          "sha256": {"pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"source_type": {"const": "git"}}},
+      "then": {"properties": {"revision": {"anyOf": [{"const": "unset"}, {"pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"}]}}}
+    }
+  ]
+}

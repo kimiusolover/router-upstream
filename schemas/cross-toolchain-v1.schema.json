@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routerctl.dev/schemas/cross-toolchain-v1.schema.json",
+  "title": "router-upstream cross toolchain record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "status", "target", "architecture", "libc", "archive_root", "compiler_triplet", "compiler_prefix", "sysroot", "source_lock"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._+-]*$"},
+    "status": {"enum": ["pending-verification", "locked"]},
+    "target": {"type": "string", "minLength": 1},
+    "architecture": {"enum": ["mipsel"]},
+    "libc": {"enum": ["musl"]},
+    "archive_root": {"type": "string", "minLength": 1},
+    "compiler_triplet": {"type": "string", "minLength": 1},
+    "compiler_prefix": {"type": "string", "minLength": 1},
+    "sysroot": {"type": "string", "minLength": 1},
+    "source_lock": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "locked"}}},
+      "then": {
+        "properties": {
+          "compiler_triplet": {"not": {"const": "unset"}},
+          "archive_root": {"not": {"const": "unset"}},
+          "compiler_prefix": {"not": {"const": "unset"}},
+          "sysroot": {"not": {"const": "unset"}},
+          "source_lock": {"not": {"const": "unset"}}
+        }
+      }
+    }
+  ]
+}

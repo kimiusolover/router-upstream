@@ -1,0 +1,18 @@
+# AX23V is distinct from Archer AX23 v1.  This record is a cross-build gate,
+# not a board-support, image, flash, or RF authorization.
+name: ax23v-v1
+status: pending-verification
+device_id: tplink-archer-ax23v-v1
+platform_target: unset
+architecture: unset
+libc: unset
+toolchain: unset
+kernel_source_lock: unset
+kernel_release: unset
+kernel_config_sha256: unset
+vermagic: unset
+hardware_evidence: []
+cross_build_authorized: false
+image_authorized: false
+flash_authorized: false
+rf_transmit_authorized: false

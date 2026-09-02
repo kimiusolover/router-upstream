@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routerctl.dev/schemas/cross-target-v1.schema.json",
+  "title": "router-upstream cross target record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "status", "device_id", "platform_target", "architecture", "libc", "toolchain", "kernel_source_lock", "kernel_release", "kernel_config_sha256", "vermagic", "hardware_evidence", "cross_build_authorized", "image_authorized", "flash_authorized", "rf_transmit_authorized"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._+-]*$"},
+    "status": {"enum": ["pending-verification", "locked"]},
+    "device_id": {"const": "tplink-archer-ax23v-v1"},
+    "platform_target": {"type": "string", "minLength": 1},
+    "architecture": {"type": "string", "minLength": 1},
+    "libc": {"type": "string", "minLength": 1},
+    "toolchain": {"type": "string", "minLength": 1},
+    "kernel_source_lock": {"type": "string", "minLength": 1},
+    "kernel_release": {"type": "string", "minLength": 1},
+    "kernel_config_sha256": {"type": "string", "pattern": "^(unset|[a-f0-9]{64})$"},
+    "vermagic": {"type": "string", "minLength": 1},
+    "hardware_evidence": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "cross_build_authorized": {"type": "boolean"},
+    "image_authorized": {"const": false},
+    "flash_authorized": {"const": false},
+    "rf_transmit_authorized": {"const": false}
+  }
+}

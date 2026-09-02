@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Verify a locally cached cross toolchain without a network fallback."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+import yaml
+
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
+SHA_RE = re.compile(r"^[a-f0-9]{64}$")
+FIELDS = {"name", "status", "target", "architecture", "libc", "archive_root", "compiler_triplet", "compiler_prefix", "sysroot", "source_lock"}
+TARGET_FIELDS = {"name", "status", "device_id", "platform_target", "architecture", "libc", "toolchain", "kernel_source_lock", "kernel_release", "kernel_config_sha256", "vermagic", "hardware_evidence", "cross_build_authorized", "image_authorized", "flash_authorized", "rf_transmit_authorized"}
+
+
+class Refusal(Exception):
+    pass
+
+
+def refuse(message: str) -> None:
+    raise Refusal(message)
+
+
+def load_yaml(path: Path, label: str) -> dict:
+    try:
+        value = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    except (OSError, yaml.YAMLError) as exc:
+        refuse(f"cannot parse {label}: {exc}")
+    if not isinstance(value, dict):
+        refuse(f"{label} must be a mapping")
+    return value
+
+
+def validate_toolchain(record: dict, path: Path) -> None:
+    if set(record) != FIELDS:
+        refuse("toolchain record has unknown or missing fields")
+    if not NAME_RE.fullmatch(record["name"]) or path.stem != record["name"]:
+        refuse("toolchain name must match its filename")
+    if record["status"] != "locked":
+        refuse("cross toolchain must be status: locked")
+    if record["architecture"] != "mipsel" or record["libc"] != "musl":
+        refuse("only the mipsel musl layer is accepted by this verifier")
+    for field in ("target", "archive_root", "compiler_triplet", "compiler_prefix", "sysroot", "source_lock"):
+        value = record[field]
+        if not isinstance(value, str) or not value or value == "unset":
+            refuse(f"toolchain {field} must be locked")
+    if not NAME_RE.fullmatch(record["source_lock"]):
+        refuse("toolchain source_lock is invalid")
+    if not record["compiler_prefix"].endswith("-") or "/" in record["compiler_prefix"]:
+        refuse("compiler_prefix must be a bare compiler prefix ending in -")
+    if Path(record["sysroot"]).is_absolute() or ".." in Path(record["sysroot"]).parts:
+        refuse("sysroot must be a safe path inside the toolchain root")
+    if Path(record["archive_root"]).is_absolute() or len(Path(record["archive_root"]).parts) != 1:
+        refuse("archive_root must be one safe directory name")
+
+
+def verify_source_lock(upstream: Path, source_id: str, cache: Path) -> tuple[Path, str]:
+    source = load_yaml(upstream / "sources" / f"{source_id}.yaml", "source lock")
+    required = {"name", "status", "upstream", "source_type", "revision", "archive", "sha256", "license", "retrieved_at", "provenance"}
+    if set(source) != required or source.get("name") != source_id or source.get("status") != "locked":
+        refuse("toolchain source lock is absent or not locked")
+    if source.get("source_type") not in {"git", "archive"} or not str(source.get("upstream", "")).startswith("https://"):
+        refuse("toolchain source lock is not a complete HTTPS source record")
+    if not isinstance(source.get("revision"), str) or not source["revision"] or source["revision"] == "unset":
+        refuse("toolchain source lock revision is not immutable")
+    provenance = source.get("provenance")
+    if not isinstance(provenance, dict) or not {"archive_url", "retrieved_by", "retrieval_method", "evidence"} <= set(provenance):
+        refuse("toolchain source lock provenance is incomplete")
+    if not str(provenance["archive_url"]).startswith("https://") or not provenance["retrieved_by"] or not provenance["evidence"]:
+        refuse("toolchain source lock provenance is invalid")
+    archive_name, digest = source["archive"], source["sha256"]
+    if not isinstance(archive_name, str) or Path(archive_name).name != archive_name:
+        refuse("toolchain source lock archive is unsafe")
+    if not isinstance(digest, str) or not SHA_RE.fullmatch(digest):
+        refuse("toolchain source lock SHA-256 is invalid")
+    archive = cache / archive_name
+    if not archive.is_file():
+        refuse("locked toolchain archive is missing from the local cache")
+    with archive.open("rb") as handle:
+        if hashlib.file_digest(handle, "sha256").hexdigest() != digest:
+            refuse("locked toolchain archive SHA-256 mismatch")
+    return archive, digest
+
+
+def validate_target(record: dict, path: Path, toolchain: dict, upstream: Path, cache: Path) -> None:
+    if set(record) != TARGET_FIELDS:
+        refuse("cross target record has unknown or missing fields")
+    if record.get("name") != "ax23v-v1" or path.stem != "ax23v-v1":
+        refuse("only the dedicated AX23V target record is accepted")
+    if record.get("status") != "locked" or record.get("cross_build_authorized") != "true":
+        refuse("AX23V cross target is not locked and authorized")
+    if record.get("device_id") != "tplink-archer-ax23v-v1":
+        refuse("AX23V device identity does not match")
+    if record.get("image_authorized") != "false" or record.get("flash_authorized") != "false" or record.get("rf_transmit_authorized") != "false":
+        refuse("cross target records cannot authorize image, flash, or RF transmission")
+    if record.get("toolchain") != toolchain["name"] or record.get("platform_target") != toolchain["target"]:
+        refuse("AX23V target does not match the locked toolchain")
+    if record.get("architecture") != toolchain["architecture"] or record.get("libc") != toolchain["libc"]:
+        refuse("AX23V ABI does not match the locked toolchain")
+    if not SHA_RE.fullmatch(record.get("kernel_config_sha256", "")):
+        refuse("AX23V kernel config SHA-256 is not locked")
+    for field in ("kernel_source_lock", "kernel_release", "vermagic"):
+        if not isinstance(record.get(field), str) or not record[field] or record[field] == "unset":
+            refuse(f"AX23V {field} is not locked")
+    evidence = record.get("hardware_evidence")
+    if not isinstance(evidence, list) or not evidence or not all(isinstance(item, str) and item for item in evidence):
+        refuse("AX23V hardware evidence is required")
+    verify_source_lock(upstream, record["kernel_source_lock"], cache)
+
+
+def run_compiler(compiler: Path, argument: str) -> str:
+    try:
+        result = subprocess.run([str(compiler), argument], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except OSError as exc:
+        refuse(f"cannot run cross compiler: {exc}")
+    if result.returncode:
+        refuse(f"cross compiler rejected {argument}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def extract_toolchain(archive: Path, destination: Path) -> None:
+    try:
+        with tarfile.open(archive, mode="r:*") as bundle:
+            members = bundle.getmembers()
+            for member in members:
+                path = Path(member.name)
+                if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk() or member.isdev():
+                    refuse("toolchain archive contains an unsafe member")
+            bundle.extractall(destination, members=members, filter="data")
+    except (OSError, tarfile.TarError) as exc:
+        refuse(f"cannot safely extract locked toolchain archive: {exc}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--record", required=True, type=Path)
+    parser.add_argument("--upstream-dir", required=True, type=Path)
+    parser.add_argument("--source-cache", required=True, type=Path)
+    parser.add_argument("--target-record", type=Path, help="optional locked AX23V target gate")
+    parser.add_argument("--report", type=Path)
+    parser.add_argument("--execute", action="store_true", help="run the explicit command with verified MIPS build variables")
+    parser.add_argument("command", nargs=argparse.REMAINDER, help="command following --execute --")
+    args = parser.parse_args()
+    try:
+        record = load_yaml(args.record, "toolchain record")
+        validate_toolchain(record, args.record)
+        archive, digest = verify_source_lock(args.upstream_dir, record["source_lock"], args.source_cache)
+        if args.target_record is not None:
+            validate_target(load_yaml(args.target_record, "cross target record"), args.target_record,
+                            record, args.upstream_dir, args.source_cache)
+        with tempfile.TemporaryDirectory(prefix="router-upstream-toolchain-") as temporary:
+            extraction = Path(temporary)
+            extract_toolchain(archive, extraction)
+            root = (extraction / record["archive_root"]).resolve(strict=True)
+            if root.parent != extraction or not root.is_dir():
+                refuse("locked toolchain archive root is missing or unsafe")
+            compiler = root / "bin" / f'{record["compiler_prefix"]}gcc'
+            if not compiler.is_file():
+                refuse("locked cross compiler is missing from toolchain archive")
+            if run_compiler(compiler, "-dumpmachine") != record["compiler_triplet"]:
+                refuse("cross compiler triplet does not match the locked record")
+            sysroot = (root / record["sysroot"]).resolve(strict=True)
+            if not sysroot.is_dir() or not sysroot.is_relative_to(root):
+                refuse("cross compiler sysroot is missing or escapes the toolchain root")
+            if run_compiler(compiler, "--print-sysroot") != str(sysroot):
+                refuse("cross compiler sysroot does not match the locked record")
+            pkgconfig = f"{sysroot}/usr/lib/pkgconfig:{sysroot}/usr/share/pkgconfig"
+            report = {"result": "accepted-for-host-build", "network_access": False,
+                      "target": record["target"], "architecture": record["architecture"],
+                      "libc": record["libc"], "compiler": str(compiler),
+                      "cross_compile": str(root / "bin" / record["compiler_prefix"]),
+                      "sysroot": str(sysroot), "pkg_config_libdir": pkgconfig,
+                      "toolchain_archive": archive.name, "toolchain_sha256": digest,
+                      "extraction": "isolated-temporary-directory"}
+            if args.report:
+                args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            print(json.dumps(report, sort_keys=True))
+            if args.execute:
+                command = args.command[1:] if args.command[:1] == ["--"] else args.command
+                if not command:
+                    refuse("--execute requires a command after --")
+                environment = {**os.environ, "CROSS_COMPILE": report["cross_compile"],
+                               "CC": str(compiler), "SYSROOT": str(sysroot),
+                               "PKG_CONFIG_SYSROOT_DIR": str(sysroot), "PKG_CONFIG_DIR": "",
+                               "PKG_CONFIG_LIBDIR": pkgconfig, "PKG_CONFIG_PATH": ""}
+                return subprocess.run(command, env=environment, check=False).returncode
+        return 0
+    except (OSError, Refusal) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

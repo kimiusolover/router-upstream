@@ -1,0 +1,13 @@
+# This declaration deliberately cannot enable a build yet.  It identifies the
+# required MIPS target boundary; an accepted toolchain archive must be added as
+# a locked source record before status can become "locked".
+name: mipsel-24kc-musl
+status: pending-verification
+target: ramips/mt7621
+architecture: mipsel
+libc: musl
+archive_root: unset
+compiler_triplet: unset
+compiler_prefix: unset
+sysroot: unset
+source_lock: unset

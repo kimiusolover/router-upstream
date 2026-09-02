@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Fail-closed verifier for a proposed router-upstream source-lock update."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import yaml
+
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
+HEX_RE = re.compile(r"^[a-f0-9]{40}(?:[a-f0-9]{24})?$")
+SHA_RE = re.compile(r"^[a-f0-9]{64}$")
+
+
+class Refusal(Exception):
+    pass
+
+
+def refuse(message: str) -> None:
+    raise Refusal(message)
+
+
+
+def run(*args: str, cwd: Path | None = None) -> str:
+    result = subprocess.run(args, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        refuse(f"command failed ({' '.join(args)}): {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def load_record(path: Path) -> dict:
+    try:
+        data = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    except (OSError, yaml.YAMLError) as exc:
+        refuse(f"cannot parse record: {exc}")
+    if not isinstance(data, dict):
+        refuse("record must be a mapping")
+    return data
+
+
+def validate(record: dict, path: Path, archive: Path) -> None:
+    fields = {"name", "status", "upstream", "source_type", "revision", "archive", "sha256", "license", "retrieved_at", "provenance"}
+    unknown, missing = set(record) - fields, fields - set(record)
+    if unknown or missing:
+        refuse(f"record fields invalid (missing={sorted(missing)}, unknown={sorted(unknown)})")
+    name = record["name"]
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name) or path.stem != name:
+        refuse("record name must match its filename")
+    if record["status"] != "locked":
+        refuse("candidate source must be status: locked")
+    if record["source_type"] not in {"git", "archive"}:
+        refuse("source_type must be git or archive")
+    if not isinstance(record["upstream"], str) or not record["upstream"].startswith("https://"):
+        refuse("upstream must use HTTPS")
+    revision = record["revision"]
+    if not isinstance(revision, str) or revision == "unset":
+        refuse("immutable revision is required")
+    if record["source_type"] == "git" and not HEX_RE.fullmatch(revision):
+        refuse("git revision must be a lowercase 40 or 64 hex object ID")
+    filename = record["archive"]
+    if not isinstance(filename, str) or filename == "unset" or Path(filename).name != filename:
+        refuse("archive must be a safe cache filename")
+    if archive.name != filename or not archive.is_file():
+        refuse("exact local archive is required")
+    digest = record["sha256"]
+    if not isinstance(digest, str) or not SHA_RE.fullmatch(digest):
+        refuse("locked source requires a lowercase SHA-256")
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
+        refuse("archive SHA-256 mismatch")
+    prov = record["provenance"]
+    allowed = {"archive_url", "retrieved_by", "retrieval_method", "evidence", "signature"}
+    if not isinstance(prov, dict) or set(prov) - allowed:
+        refuse("invalid provenance fields")
+    for field in ("archive_url", "retrieved_by", "retrieval_method", "evidence"):
+        if field not in prov:
+            refuse(f"provenance.{field} is required")
+    if not isinstance(prov["archive_url"], str) or not prov["archive_url"].startswith("https://"):
+        refuse("provenance.archive_url must use HTTPS")
+    if prov["retrieval_method"] not in {"manual", "automation"} or not prov["retrieved_by"]:
+        refuse("invalid retrieval provenance")
+    if not isinstance(prov["evidence"], list) or not prov["evidence"] or not all(isinstance(x, str) and x for x in prov["evidence"]):
+        refuse("non-empty provenance evidence is required")
+    signature = prov.get("signature")
+    if signature is not None and (not isinstance(signature, dict) or signature.get("status") == "not-verified"):
+        refuse("unverified signatures require human review and cannot be auto-proposed")
+
+
+def test_patches(repo: Path, revision: str, patch_dir: Path | None) -> int:
+    if not repo.is_dir() or not (repo / ".git").exists():
+        refuse("--upstream-repo must be a local Git checkout")
+    if run("git", "status", "--porcelain", cwd=repo):
+        refuse("upstream checkout must be clean")
+    if run("git", "rev-parse", "--verify", revision + "^{commit}", cwd=repo) != revision:
+        refuse("upstream checkout does not contain the exact candidate revision")
+    if patch_dir is not None and not patch_dir.is_dir():
+        refuse("patch directory does not exist")
+    patches = [] if patch_dir is None else sorted(patch_dir.glob("*.patch"))
+    with tempfile.TemporaryDirectory(prefix="router-upstream-sync-") as temp:
+        worktree = Path(temp) / "worktree"
+        run("git", "worktree", "add", "--detach", str(worktree), revision, cwd=repo)
+        try:
+            for patch in patches:
+                run("git", "am", "--3way", str(patch.resolve()), cwd=worktree)
+        finally:
+            subprocess.run(["git", "worktree", "remove", "--force", str(worktree)], cwd=repo, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return len(patches)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="verify a proposed locked upstream update without network access")
+    parser.add_argument("--record", required=True, type=Path)
+    parser.add_argument("--archive", required=True, type=Path)
+    parser.add_argument("--upstream-repo", required=True, type=Path)
+    parser.add_argument("--patch-dir", type=Path)
+    parser.add_argument("--report", type=Path)
+    args = parser.parse_args()
+    try:
+        record = load_record(args.record)
+        validate(record, args.record, args.archive)
+        patch_count = test_patches(args.upstream_repo, record["revision"], args.patch_dir)
+        report = {"result": "needs-review", "name": record["name"], "revision": record["revision"], "sha256": record["sha256"], "patches_tested": patch_count, "network_access": False, "auto_merge": False}
+        if args.report:
+            args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(json.dumps(report, sort_keys=True))
+        return 0
+    except Refusal as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

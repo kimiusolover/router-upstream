@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# AX23V must always pass its separate target gate before using a MIPS toolchain.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+exec "$root/cross/verify-toolchain" --target-record "$root/targets/ax23v-v1.yaml" "$@"

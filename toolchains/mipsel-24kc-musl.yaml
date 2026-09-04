@@ -1,13 +1,10 @@
-# This declaration deliberately cannot enable a build yet.  It identifies the
-# required MIPS target boundary; an accepted toolchain archive must be added as
-# a locked source record before status can become "locked".
 name: mipsel-24kc-musl
-status: pending-verification
+status: locked
 target: ramips/mt7621
 architecture: mipsel
 libc: musl
-archive_root: unset
-compiler_triplet: unset
-compiler_prefix: unset
-sysroot: unset
-source_lock: unset
+archive_root: openwrt-toolchain-25.12.5-ramips-mt7621_gcc-14.3.0_musl.Linux-x86_64/toolchain-mipsel_24kc_gcc-14.3.0_musl
+compiler_triplet: mipsel-openwrt-linux-musl
+compiler_prefix: mipsel-openwrt-linux-musl-
+sysroot: .
+source_lock: openwrt-25.12.5-ramips-mt7621-toolchain

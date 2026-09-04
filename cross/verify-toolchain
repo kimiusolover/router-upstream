@@ -58,8 +58,9 @@ def validate_toolchain(record: dict, path: Path) -> None:
         refuse("compiler_prefix must be a bare compiler prefix ending in -")
     if Path(record["sysroot"]).is_absolute() or ".." in Path(record["sysroot"]).parts:
         refuse("sysroot must be a safe path inside the toolchain root")
-    if Path(record["archive_root"]).is_absolute() or len(Path(record["archive_root"]).parts) != 1:
-        refuse("archive_root must be one safe directory name")
+    archive_root = Path(record["archive_root"])
+    if archive_root.is_absolute() or ".." in archive_root.parts:
+        refuse("archive_root must be a safe path inside the extracted archive")
 
 
 def verify_source_lock(upstream: Path, source_id: str, cache: Path) -> tuple[Path, str]:
@@ -132,7 +133,7 @@ def extract_toolchain(archive: Path, destination: Path) -> None:
             members = bundle.getmembers()
             for member in members:
                 path = Path(member.name)
-                if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk() or member.isdev():
+                if path.is_absolute() or ".." in path.parts or member.isdev():
                     refuse("toolchain archive contains an unsafe member")
             bundle.extractall(destination, members=members, filter="data")
     except (OSError, tarfile.TarError) as exc:
@@ -160,7 +161,7 @@ def main() -> int:
             extraction = Path(temporary)
             extract_toolchain(archive, extraction)
             root = (extraction / record["archive_root"]).resolve(strict=True)
-            if root.parent != extraction or not root.is_dir():
+            if not root.is_relative_to(extraction) or not root.is_dir():
                 refuse("locked toolchain archive root is missing or unsafe")
             compiler = root / "bin" / f'{record["compiler_prefix"]}gcc'
             if not compiler.is_file():
@@ -170,7 +171,8 @@ def main() -> int:
             sysroot = (root / record["sysroot"]).resolve(strict=True)
             if not sysroot.is_dir() or not sysroot.is_relative_to(root):
                 refuse("cross compiler sysroot is missing or escapes the toolchain root")
-            if run_compiler(compiler, "--print-sysroot") != str(sysroot):
+            compiler_sysroot = Path(run_compiler(compiler, "--print-sysroot")).resolve(strict=True)
+            if not compiler_sysroot.is_relative_to(root) or compiler_sysroot != sysroot:
                 refuse("cross compiler sysroot does not match the locked record")
             pkgconfig = f"{sysroot}/usr/lib/pkgconfig:{sysroot}/usr/share/pkgconfig"
             report = {"result": "accepted-for-host-build", "network_access": False,

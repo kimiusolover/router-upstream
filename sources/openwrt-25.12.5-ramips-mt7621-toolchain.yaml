@@ -1,0 +1,17 @@
+name: openwrt-25.12.5-ramips-mt7621-toolchain
+status: locked
+upstream: https://downloads.openwrt.org/releases/25.12.5/targets/ramips/mt7621/
+source_type: archive
+revision: 25.12.5-r33051-f5dae5ece4
+archive: openwrt-toolchain-25.12.5-ramips-mt7621_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+sha256: 04316e081dcaea0394d3a8eca761500c91d7d54e9d49ccb8f855ae257ea4f995
+license: NOASSERTION
+retrieved_at: 2026-09-04T11:14:41+09:00
+provenance:
+  archive_url: https://downloads.openwrt.org/releases/25.12.5/targets/ramips/mt7621/openwrt-toolchain-25.12.5-ramips-mt7621_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+  retrieved_by: nakan
+  retrieval_method: manual
+  evidence:
+    - https://downloads.openwrt.org/releases/25.12.5/targets/ramips/mt7621/sha256sums
+    - https://downloads.openwrt.org/releases/25.12.5/targets/ramips/mt7621/sha256sums.asc
+    - OpenWrt 25.12.5 build metadata: target=ramips/mt7621; version=r33051-f5dae5ece4; arch_packages=mipsel_24kc

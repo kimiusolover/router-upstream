@@ -9,7 +9,7 @@
     "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._+-]*$"},
     "status": {"enum": ["pending-verification", "locked"]},
     "target": {"type": "string", "minLength": 1},
-    "architecture": {"enum": ["mipsel"]},
+    "architecture": {"enum": ["mipsel", "x86_64"]},
     "libc": {"enum": ["musl"]},
     "archive_root": {"type": "string", "minLength": 1},
     "compiler_triplet": {"type": "string", "minLength": 1},

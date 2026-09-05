@@ -1,0 +1,21 @@
+name: openwrt-25.12.5-x86-64-toolchain
+status: locked
+upstream: https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/
+source_type: archive
+revision: 25.12.5-r33051-f5dae5ece4
+archive: openwrt-toolchain-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+sha256: d34d210785e45b3a06460397f3c350d33644fe5660fb7d92d529bf6c47669037
+license: NOASSERTION
+retrieved_at: 2026-09-04T14:24:54+09:00
+provenance:
+  archive_url: https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/openwrt-toolchain-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+  retrieved_by: nakan
+  retrieval_method: manual
+  evidence:
+    - https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/sha256sums
+    - https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/sha256sums.asc
+    - OpenWrt 25.12.5 build metadata: target=x86/64; version=r33051-f5dae5ece4; arch_packages=x86_64
+  signature:
+    status: verified
+    type: OpenPGP detached signature
+    signer: 8A8BC12F46B836C0F9CDB36F1D53D1877742E911

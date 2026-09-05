@@ -19,6 +19,10 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
 SHA_RE = re.compile(r"^[a-f0-9]{64}$")
 FIELDS = {"name", "status", "target", "architecture", "libc", "archive_root", "compiler_triplet", "compiler_prefix", "sysroot", "source_lock"}
 TARGET_FIELDS = {"name", "status", "device_id", "platform_target", "architecture", "libc", "toolchain", "kernel_source_lock", "kernel_release", "kernel_config_sha256", "vermagic", "hardware_evidence", "cross_build_authorized", "image_authorized", "flash_authorized", "rf_transmit_authorized"}
+SUPPORTED_TOOLCHAINS = {
+    ("ramips/mt7621", "mipsel", "musl"),
+    ("x86/64", "x86_64", "musl"),
+}
 
 
 class Refusal(Exception):
@@ -46,8 +50,8 @@ def validate_toolchain(record: dict, path: Path) -> None:
         refuse("toolchain name must match its filename")
     if record["status"] != "locked":
         refuse("cross toolchain must be status: locked")
-    if record["architecture"] != "mipsel" or record["libc"] != "musl":
-        refuse("only the mipsel musl layer is accepted by this verifier")
+    if (record["target"], record["architecture"], record["libc"]) not in SUPPORTED_TOOLCHAINS:
+        refuse("toolchain target, architecture, or libc is unsupported")
     for field in ("target", "archive_root", "compiler_triplet", "compiler_prefix", "sysroot", "source_lock"):
         value = record[field]
         if not isinstance(value, str) or not value or value == "unset":

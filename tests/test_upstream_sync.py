@@ -179,6 +179,36 @@ rf_transmit_authorized: false
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('"result": "accepted-for-host-build"', result.stdout)
 
+    def test_accepts_exact_locked_x86_64_toolchain(self):
+        staging = self.path / "staging" / "x86-toolchain"
+        (staging / "bin").mkdir(parents=True)
+        (staging / "sysroot").mkdir()
+        compiler = staging / "bin" / "x86_64-router-linux-musl-gcc"
+        compiler.write_text(
+            "#!/bin/sh\nroot=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\ncase \"$1\" in\n-dumpmachine) echo x86_64-router-linux-musl ;;\n--print-sysroot) echo \"$root/sysroot\" ;;\nesac\n"
+        )
+        compiler.chmod(0o755)
+        archive = self.cache / "x86-toolchain.tar.xz"
+        with tarfile.open(archive, "w:xz") as bundle:
+            bundle.add(staging, arcname="x86-toolchain")
+        self.write_source_lock("x86-toolchain", archive, hashlib.sha256(archive.read_bytes()).hexdigest())
+        record = self.path / "x86-64-musl.yaml"
+        record.write_text('''name: x86-64-musl
+status: locked
+target: x86/64
+architecture: x86_64
+libc: musl
+archive_root: x86-toolchain
+compiler_triplet: x86_64-router-linux-musl
+compiler_prefix: x86_64-router-linux-musl-
+sysroot: sysroot
+source_lock: x86-toolchain
+''')
+        result = cross_call("--record", record, "--upstream-dir", self.upstream,
+                            "--source-cache", self.cache)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"architecture": "x86_64"', result.stdout)
+
     def test_rejects_pending_toolchain(self):
         result = cross_call("--record", self.record(status="pending-verification"), "--upstream-dir", self.upstream,
                             "--source-cache", self.cache)

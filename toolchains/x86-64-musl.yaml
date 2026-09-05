@@ -1,0 +1,10 @@
+name: x86-64-musl
+status: locked
+target: x86/64
+architecture: x86_64
+libc: musl
+archive_root: openwrt-toolchain-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64/toolchain-x86_64_gcc-14.3.0_musl
+compiler_triplet: x86_64-openwrt-linux-musl
+compiler_prefix: x86_64-openwrt-linux-musl-
+sysroot: .
+source_lock: openwrt-25.12.5-x86-64-toolchain
